@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <memory>
+#include <map>
 #include <opencv2/opencv.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
@@ -28,17 +29,23 @@
 #include "rclcpp/rclcpp.hpp"
 
 struct CameraIntrinsics {
-  float fx, fy; // Focal lengths in x and y
-  float cx, cy; // Optical center coordinates
+  cv::Mat cameraMatrix; // Camera matrix (K)
+  cv::Mat distCoeffs;   // Distortion coefficients (D)
+  float fx, fy;         // Focal lengths in x and y
+  float cx, cy;         // Optical center coordinates
 };
 
+struct TimedPoint {
+  pcl::PointXYZ point;
+  int age; // Age or time since this point was added, used for fading
+};
 
 class ImageSubscriber : public rclcpp::Node
 {
 public:
   ImageSubscriber() : Node("image_subscriber"), it_(nullptr)
   {
-    pcl_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    pcl_cloud_ = std::make_shared<std::vector<TimedPoint>>();
   }
 
   void init()
@@ -52,24 +59,24 @@ public:
 
     publisher_ = it_->advertise("/overlay_radar_camera", 10);
 
-    intrinsics = {1288.56, 1293.73, 1179.74, 802.44};
+    intrinsics.cameraMatrix = (cv::Mat_<double>(3, 3) << 1288.56, 0, 1179.74, 0, 1293.73, 802.44, 0, 0, 1);
+    intrinsics.distCoeffs = (cv::Mat_<double>(5, 1) << -0.24541651244031235, 0.05791238049933166, 0.0009060251209707499, -0.006485038511542, 0.0);
+    intrinsics.fx = 1288.56;
+    intrinsics.fy = 1293.73;
+    intrinsics.cx = 1179.74;
+    intrinsics.cy = 802.44;
   }
 
 private:
   void image_callback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
   {
     try {
-      // Transform the ros msg to cv::Mat, and draw the point cloud on it
       cv::Mat frame = cv_bridge::toCvShare(msg, "bgr8")->image;
-      draw_pcl(frame);
-
-      // Transform the cv::Mat back to ros msg and publish it
-      auto out_msg = cv_bridge::CvImage(msg->header, "bgr8", frame).toImageMsg();
+      cv::Mat undistorted_frame;
+      cv::undistort(frame, undistorted_frame, intrinsics.cameraMatrix, intrinsics.distCoeffs);
+      draw_pcl(undistorted_frame);
+      auto out_msg = cv_bridge::CvImage(msg->header, "bgr8", undistorted_frame).toImageMsg();
       publisher_.publish(out_msg);
-      
-      // Display the modified image for debugging
-      cv::imshow("Modified Image", frame);
-      cv::waitKey(10);
     } 
     catch (cv_bridge::Exception& e) {
       RCLCPP_ERROR(this->get_logger(), "Could not convert from '%s' to 'bgr8'.", msg->encoding.c_str());
@@ -78,60 +85,48 @@ private:
 
   void pcl_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
   {
-    if (msg->data.empty()) {
-      pcl_cloud_->points.clear();
-      return;
+    pcl::PointCloud<pcl::PointXYZ> new_cloud;
+    pcl::fromROSMsg(*msg, new_cloud);
+    for (const auto& pt : new_cloud.points) {
+      pcl_cloud_->emplace_back(TimedPoint{pt, 0});
     }
-    // Convert the point cloud to pcl format so that we can draw it on the image
-    RCLCPP_INFO(this->get_logger(), "Received point cloud with %d points", msg->width * msg->height);
-    pcl::fromROSMsg(*msg, *pcl_cloud_);
+    // Increment ages and remove old points
+    auto it = pcl_cloud_->begin();
+    while (it != pcl_cloud_->end()) {
+      it->age++;
+      if (it->age > 30) { // Points fade out after 30 frames
+        it = pcl_cloud_->erase(it);
+      } else {
+        ++it;
+      }
+    }
   }
 
   void draw_pcl(cv::Mat &frame)
   {
-    if (pcl_cloud_->points.size() == 0) {
-      return;
-    }
+    for (const auto& timed_point : *pcl_cloud_) {
+      float logical_x = static_cast<float>(timed_point.point.y);
+      float logical_y = static_cast<float>(-timed_point.point.x);
+      float logical_z = static_cast<float>(timed_point.point.z);
 
-    // RCLCPP_INFO(this->get_logger(), "Drawing point cloud");
-    for (const auto& pt : pcl_cloud_->points) {
-      // y is straight ahead, z is up, and x is to the right. Convert to make sense.
-      float logical_x = static_cast<float>(pt.y);
-      float logical_y = static_cast<float>(-pt.x);
-      float logical_z = static_cast<float>(pt.z);
+      if (logical_x <= 0) continue;
 
-      if (logical_x <= 0) continue;  // Ensure the point is in front of the camera
-
-      // Formula from: https://towardsdatascience.com/what-are-intrinsic-and-extrinsic-camera-parameters-in-computer-vision-7071b72fb8ec
-      int pixel_x = static_cast<int>(logical_x * intrinsics.fx / logical_z + intrinsics.cx);
+      int pixel_x = static_cast<int>( - (logical_x * intrinsics.fx / logical_z + intrinsics.cx));
       int pixel_y = static_cast<int>(logical_y * intrinsics.fy / logical_z + intrinsics.cy);
 
-      if (pixel_x < 0 || pixel_x > frame.cols || pixel_y < 0 || pixel_y > frame.rows) {
-          continue;
-      }
-
-      float depth = sqrt(pow(logical_x, 2) + pow(logical_y, 2) + pow(logical_z, 2));
-      RCLCPP_INFO(this->get_logger(), "Depth: %f, (%f, %f, %f)", depth, logical_x, logical_y, logical_z);
-      cv::Scalar color = depth_to_color(depth);
+      if (pixel_x < 0 || pixel_x >= frame.cols || pixel_y < 0 || pixel_y >= frame.rows) continue;
       
-      cv::circle(frame, cv::Point(pixel_x, pixel_y), 10, color, -1);
+      int alpha = 255 - (timed_point.age * 8); // Decrease alpha to make points fade out
+      alpha = std::max(alpha, 0);
+      cv::circle(frame, cv::Point(pixel_x, pixel_y), 10, cv::Scalar(0, 0, 255, alpha), -1);
     }
-  }
-
-  cv::Scalar depth_to_color(float depth)
-  {
-    // Adjust these ranges and colors as necessary
-    if (depth < 1.0) return CV_RGB(255, 0, 0);     // Red for very close
-    else if (depth < 3.0) return CV_RGB(0, 255, 0); // Green for close
-    else if (depth < 5.0) return CV_RGB(0, 0, 255); // Blue for moderate
-    else return CV_RGB(255, 255, 255);          // White for far
   }
 
   std::unique_ptr<image_transport::ImageTransport> it_;
   image_transport::Subscriber image_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pcl_subscription_;
   image_transport::Publisher publisher_;
-  std::shared_ptr<pcl::PointCloud<pcl::PointXYZ>> pcl_cloud_;
+  std::shared_ptr<std::vector<TimedPoint>> pcl_cloud_;
   CameraIntrinsics intrinsics;
 };
 
