@@ -1,0 +1,3 @@
+[submodule "src/ros-gst-bridge"]
+	path = src/ros-gst-bridge
+	url = https://github.com/BrettRD/ros-gst-bridge
