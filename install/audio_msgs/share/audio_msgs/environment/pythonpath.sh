@@ -1,1 +1,3 @@
-/home/nicolai/ascend/2024/overlay_pcl_on_video/build/audio_msgs/ament_cmake_environment_hooks/pythonpath.sh
+# generated from ament_package/template/environment_hook/pythonpath.sh.in
+
+ament_prepend_unique_value PYTHONPATH "$AMENT_CURRENT_PREFIX/local/lib/python3.10/dist-packages"

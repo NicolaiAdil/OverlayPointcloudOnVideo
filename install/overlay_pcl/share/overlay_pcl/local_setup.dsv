@@ -1,1 +1,2 @@
-/home/nicolai/ascend/2024/overlay_pcl_on_video/build/overlay_pcl/ament_cmake_environment_hooks/local_setup.dsv
+source;share/overlay_pcl/environment/ament_prefix_path.sh
+source;share/overlay_pcl/environment/path.sh

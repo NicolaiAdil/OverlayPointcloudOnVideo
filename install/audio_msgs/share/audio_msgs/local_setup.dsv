@@ -1,1 +1,4 @@
-/home/nicolai/ascend/2024/overlay_pcl_on_video/build/audio_msgs/ament_cmake_environment_hooks/local_setup.dsv
+source;share/audio_msgs/environment/ament_prefix_path.sh
+source;share/audio_msgs/environment/library_path.sh
+source;share/audio_msgs/environment/path.sh
+source;share/audio_msgs/environment/pythonpath.sh

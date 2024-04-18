@@ -1,1 +1,60 @@
-/home/nicolai/ascend/2024/overlay_pcl_on_video/build/audio_msgs/rosidl_adapter/audio_msgs/msg/Audio.idl
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from audio_msgs/msg/Audio.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module audio_msgs {
+  module msg {
+    module Audio_Constants {
+      const uint8 LAYOUT_INTERLEAVED = 0;
+      const uint8 LAYOUT_NON_INTERLEAVED = 1;
+    };
+    @verbatim (language="comment", text=
+      "This message contains uncompressed audio")
+    struct Audio {
+      @verbatim (language="comment", text=
+        "Header timestamp should be acquisition time the beginning of the buffer" "\n"
+        "Header frame_id should be meaningful to the location of the transducers")
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "accumulator of number of frames that came before this message")
+      uint64 seq_num;
+
+      @verbatim (language="comment", text=
+        "Number of sample-rate intervals in this buffer")
+      uint32 frames;
+
+      @verbatim (language="comment", text=
+        "number of channels of audio")
+      uint32 channels;
+
+      @verbatim (language="comment", text=
+        "the sample rate of the audio in Hz (number type following Gstreamer)" "\n"
+        "Values for encoding should follow Image message OpenCV convention")
+      int32 sample_rate;
+
+      @verbatim (language="comment", text=
+        "Encoding of samples, channel meaning, ordering, etc" "\n"
+        "this field should be extended")
+      string encoding;
+
+      @verbatim (language="comment", text=
+        "is this data bigendian?")
+      uint8 is_bigendian;
+
+      @verbatim (language="comment", text=
+        "are audio samples interleaved into frames?")
+      uint8 layout;
+
+      @verbatim (language="comment", text=
+        "audio frame size in bytes")
+      uint32 step;
+
+      @verbatim (language="comment", text=
+        "actual matrix data, size is (step * frames)")
+      sequence<uint8> data;
+    };
+  };
+};
